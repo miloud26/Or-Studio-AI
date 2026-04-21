@@ -1,0 +1,76 @@
+{
+  "editing_flow": [
+    {
+      "id": "fast_hook",
+      "prompt_signal": ["fast cuts", "hook", "attention", "urgent"],
+      "visual_cues": ["high motion", "bright colors", "product focus"],
+      "motion_cues": ["dynamic", "rapid"],
+      "description": "Start with high-energy cuts to grab attention in the first 2 seconds.",
+      "source_basis": "Social Media Ad best practices"
+    },
+    {
+      "id": "rhythmic_pacing",
+      "prompt_signal": ["rhythm", "music match", "beat", "flow"],
+      "visual_cues": ["repetitive motion", "on-beat movement"],
+      "motion_cues": ["consistent tempo"],
+      "description": "Align cuts with the rhythm of the visual energy or implied audio beat.",
+      "source_basis": "Music Video editing"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "match_cut",
+      "prompt_signal": ["match", "continuation", "seamless"],
+      "visual_cues": ["similar shapes", "matching movement direction"],
+      "transition_cues": ["invisible", "smooth"],
+      "description": "Use matching visual elements or direction between shots for a seamless transition.",
+      "source_basis": "Cinematic Editing"
+    },
+    {
+      "id": "whip_pan",
+      "prompt_signal": ["whip", "fast pan", "energy", "dynamic"],
+      "motion_cues": ["lateral blur", "high speed"],
+      "transition_cues": ["motion blur", "fast"],
+      "description": "A fast camera pan that blurs the image and leads into the next shot.",
+      "source_basis": "Action Cinematography"
+    }
+  ],
+  "motion_graphics": [
+    {
+      "id": "minimalist_text",
+      "prompt_signal": ["minimal", "clean", "premium", "modern"],
+      "description": "Use clean, high-contrast sans-serif typography with subtle scale animations.",
+      "source_basis": "Apple-style Advertising"
+    }
+  ],
+  "typography": [],
+  "motion_camera": [
+    {
+      "id": "push_in",
+      "prompt_signal": ["push", "zoom", "focus", "reveal"],
+      "motion_cues": ["forward movement", "narrowing frame"],
+      "description": "Subtle push forward to emphasize the subject.",
+      "source_basis": "Standard Cinematography"
+    }
+  ],
+  "color": [
+    {
+      "id": "cinematic_teal_orange",
+      "prompt_signal": ["teal", "orange", "hollywood", "blockbuster", "warm"],
+      "visual_cues": ["warm skin tones", "cool shadows"],
+      "description": "High contrast color grading using complementary teal and orange.",
+      "source_basis": "Modern Feature Film"
+    }
+  ],
+  "audio": [],
+  "composition": [
+    {
+      "id": "rule_of_thirds",
+      "prompt_signal": ["balanced", "cinematic", "classic"],
+      "visual_cues": ["off-center subject"],
+      "description": "Place key elements along the lines of a 3x3 grid.",
+      "source_basis": "Classical Photography"
+    }
+  ],
+  "workflow": []
+}
