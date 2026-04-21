@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Film, Wand2, Download, AlertCircle, CheckCircle2, RotateCcw, Lightbulb, FileJson, Share2, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { uploadClips, startRender, getJobStatus } from './services/api.ts';
-import { generateCreativeOutput } from './services/geminiService.ts';
+import { uploadClips, startRender, getJobStatus, analyzeJob } from './services/api.ts';
 import { JobStatus, MontagePlan, PromptResponse } from './types.ts';
 
 export default function App() {
@@ -63,9 +62,9 @@ export default function App() {
       const { jobId: newJobId, clips } = await uploadClips(files);
       setJobId(newJobId);
       
-      // 2. Analyze (Gemini call on frontend)
+      // 2. Analyze (Gemini call on BACKEND)
       setStatus({ id: newJobId, status: 'analyzing', progress: 0, mode });
-      const creativeOutput = await generateCreativeOutput(newJobId, clips, prompt, mode);
+      const creativeOutput = await analyzeJob(newJobId, prompt, mode);
       
       if (mode === 'PROMPT') {
         setStatus({
