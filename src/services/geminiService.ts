@@ -1,83 +1,92 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import fs from 'fs-extra';
-import path from 'path';
 import { MontagePlan, PromptResponse, ClipMetadata, MontagePlanSchema, PromptResponseSchema } from '../types.ts';
+import internalSkillLibrary from './skill_library.json';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
 
-const SKILLS_PATH_INTERNAL = path.join(process.cwd(), 'src', 'services', 'skill_library.json');
-const SKILLS_PATH_ROOT = path.join(process.cwd(), 'skill_library.json');
-
 const SYSTEM_INSTRUCTION = `
-SYSTEM UPDATE — DYNAMIC SKILL LIBRARY ANALYST
-You are a production-grade Creative Director and Decision Engine.
-A skill library is provided as your authoritative internal knowledge and ruleset.
+ROLE
+You are a production-grade Creative Director, Visual Analyst, Editor, and Code Reviewer.
 
-MANDATORY RULES:
-1. Parse the provided library.
-2. If the library is provided, it OVERRIDES all generic or default artistic behaviors.
-3. It is your PRIMARY creative source.
-4. Use prompt_signal, visual_cues, motion_cues, and transition_cues to build your response.
-5. Strictly avoid any behaviors identified in negative_cues.
-6. Merge multiple skill rules into a single coherent, production-ready plan.
-7. Output must strictly reflect the applied skills.
-8. Your output must be VALID JSON ONLY.
+CAPABILITIES
+- Accept multimodal inputs: images and short videos (represented via base64 in parts).
+- Accept an optional Skill Library file (JSON) provided at runtime.
+- Produce either: (A) prompt_generation (B) montage_planning.
+- Perform SELF-REVIEW and AUTO-CORRECTION before final output.
+
+HARD RULES
+- Output must be VALID JSON only.
+- No markdown, no prose outside JSON.
+- Do not hallucinate visual details.
+- Use MM:SS timestamps when referencing video moments.
+- Optimize for vertical 1080x1920 unless user requests otherwise.
+
+ANALYSIS PIPELINE
+1) Detect mode.
+2) Per-media analysis: subject, scene, camera, lighting, motion, composition, hook value.
+3) Skill retrieval (from authoritative library if present).
+4) Build plan.
+5) SELF-REVIEW: Validate schema, check consistency (duration = end - start, no duplicate order), check visual logic.
+6) AUTO-CORRECT: Fix any issues silently.
+7) Return valid JSON.
 `;
 
+const fileToPart = async (file: File) => {
+  return new Promise<any>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      resolve({
+        inlineData: {
+          data: (reader.result as string).split(',')[1],
+          mimeType: file.type,
+        },
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
 export const generateCreativeOutput = async (
-  jobId: string, 
-  clips: ClipMetadata[], 
+  files: File[], 
   userPrompt: string,
-  mode: 'PROMPT' | 'MONTAGE',
+  mode: 'PROMPT' | 'MONTAGE' | 'AUTO',
   customSkillLibrary?: any
 ): Promise<MontagePlan | PromptResponse> => {
-  const model = "gemini-3.1-pro-preview";
+  const model = "gemini-3-flash-preview";
   
-  // Dynamic Skill Loading: Root overrides Internal, Custom overrides Root
-  let skillLibrary = {};
-  try {
-    // Try root first (developer override)
-    if (await fs.pathExists(SKILLS_PATH_ROOT)) {
-      skillLibrary = await fs.readJson(SKILLS_PATH_ROOT);
-    } else {
-      // Fallback to internal
-      skillLibrary = await fs.readJson(SKILLS_PATH_INTERNAL);
-    }
-    
-    // If custom library provided at runtime (e.g. from request), it has final authority
-    if (customSkillLibrary) {
-      skillLibrary = { ...skillLibrary, ...customSkillLibrary };
-    }
-  } catch (err) {
-    console.error('Skill library loading failed, continuing with partial/empty dataset', err);
+  // Dynamic Skill Loading
+  let skillLibrary = { ...internalSkillLibrary };
+  if (customSkillLibrary) {
+    skillLibrary = { ...skillLibrary, ...customSkillLibrary };
   }
 
-  const clipSummary = clips.map((c, i) => `clip_${i+1}: ${c.duration}s, ${c.width}x${c.height}, ${c.fps}fps`).join('\n');
-  
-  const prompt = `
+  const mediaParts = await Promise.all(files.slice(0, 10).map(fileToPart));
+
+  const promptText = `
     AUTHORITATIVE SKILL LIBRARY:
     ${JSON.stringify(skillLibrary, null, 2)}
 
-    TASK: ${mode === 'PROMPT' ? 'PROMPT_MODE' : 'MONTAGE_MODE'}
+    TASK: ${mode}_MODE
     User Intent: ${userPrompt}
     
-    Media Assets:
-    ${clipSummary}
+    Media Assets: Provided multimodal parts.
     
     REQUIRED ACTION:
-    Identify relevant skills from the library and apply them to this ${mode === 'PROMPT' ? 'prompt generation' : 'montage plan'}. 
-    Ensure the output structure reflects the "applied_skills" used.
+    Identify relevant skills from the library and apply them to this analysis.
+    If mode is AUTO, decide if the user wants a cinematic prompt generation or an FFmpeg montage plan. 
+    Perform a MANDATORY SELF-REVIEW and AUTO-CORRECTION before finalizing the JSON.
+    Ensure output matches the specified schema.
   `;
 
   const response = await ai.models.generateContent({
     model,
-    contents: prompt,
+    contents: { parts: [...mediaParts, { text: promptText }] },
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       responseMimeType: "application/json",
       responseSchema: mode === 'PROMPT' ? {
         type: Type.OBJECT,
-        required: ["mode", "applied_skills", "visual_summary", "creative_direction", "prompt", "negative_prompt", "confidence"],
+        required: ["mode", "applied_skills", "visual_summary", "creative_direction", "confidence", "self_review"],
         properties: {
           mode: { type: Type.STRING },
           applied_skills: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -98,6 +107,8 @@ export const generateCreativeOutput = async (
           creative_direction: {
             type: Type.OBJECT,
             properties: {
+              prompt: { type: Type.STRING },
+              negative_prompt: { type: Type.STRING },
               keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
               camera_language: { type: Type.ARRAY, items: { type: Type.STRING } },
               motion_language: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -105,15 +116,22 @@ export const generateCreativeOutput = async (
               composition_rules: { type: Type.ARRAY, items: { type: Type.STRING } },
             }
           },
-          prompt: { type: Type.STRING },
-          negative_prompt: { type: Type.STRING },
           confidence: { type: Type.NUMBER },
+          self_review: {
+             type: Type.OBJECT,
+             properties: {
+               issues_found: { type: Type.ARRAY, items: { type: Type.STRING } },
+               fixes_applied: { type: Type.ARRAY, items: { type: Type.STRING } }
+             }
+          }
         }
       } : {
         type: Type.OBJECT,
-        required: ["mode", "applied_skills", "clip_analysis", "timeline", "render", "editing_notes", "fallback_strategy", "confidence"],
+        required: ["mode", "project_type", "style", "applied_skills", "clip_analysis", "timeline", "render", "editing_notes", "fallback_strategy", "confidence", "self_review"],
         properties: {
           mode: { type: Type.STRING },
+          project_type: { type: Type.STRING },
+          style: { type: Type.STRING },
           applied_skills: { type: Type.ARRAY, items: { type: Type.STRING } },
           clip_analysis: {
             type: Type.ARRAY,
@@ -195,7 +213,14 @@ export const generateCreativeOutput = async (
           },
           editing_notes: { type: Type.ARRAY, items: { type: Type.STRING } },
           fallback_strategy: { type: Type.OBJECT },
-          confidence: { type: Type.NUMBER }
+          confidence: { type: Type.NUMBER },
+          self_review: {
+             type: Type.OBJECT,
+             properties: {
+               issues_found: { type: Type.ARRAY, items: { type: Type.STRING } },
+               fixes_applied: { type: Type.ARRAY, items: { type: Type.STRING } }
+             }
+          }
         }
       }
     }
@@ -204,7 +229,7 @@ export const generateCreativeOutput = async (
   const rawJson = response.text;
   const result = JSON.parse(rawJson);
   
-  if (mode === 'PROMPT') {
+  if (result.mode === 'prompt_generation' || mode === 'PROMPT') {
     return PromptResponseSchema.parse(result);
   } else {
     return MontagePlanSchema.parse(result);

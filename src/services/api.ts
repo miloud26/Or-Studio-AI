@@ -8,8 +8,8 @@ export const uploadClips = async (files: File[]): Promise<{ jobId: string, clips
   return response.data;
 };
 
-export const analyzeJob = async (jobId: string, prompt: string, mode: string): Promise<MontagePlan | PromptResponse> => {
-  const response = await axios.post('/api/analyze', { jobId, prompt, mode });
+export const analyzeJob = async (jobId: string, prompt: string, mode: string, customLibrary?: any): Promise<MontagePlan | PromptResponse> => {
+  const response = await axios.post('/api/analyze', { jobId, prompt, mode, customLibrary });
   return response.data;
 };
 

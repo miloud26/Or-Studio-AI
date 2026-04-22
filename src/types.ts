@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+// --- Common types for self-review ---
+export const SelfReviewSchema = z.object({
+  issues_found: z.array(z.string()),
+  fixes_applied: z.array(z.string()),
+});
+
 // --- Prompt Mode Types ---
 export const PromptResponseSchema = z.object({
   mode: z.literal('prompt_generation'),
@@ -16,15 +22,16 @@ export const PromptResponseSchema = z.object({
     style: z.string(),
   }),
   creative_direction: z.object({
+    prompt: z.string(),
+    negative_prompt: z.string(),
     keywords: z.array(z.string()),
     camera_language: z.array(z.string()),
     motion_language: z.array(z.string()),
     lighting_language: z.array(z.string()),
     composition_rules: z.array(z.string()),
   }),
-  prompt: z.string(),
-  negative_prompt: z.string(),
   confidence: z.number(),
+  self_review: SelfReviewSchema,
 });
 
 export type PromptResponse = z.infer<typeof PromptResponseSchema>;
@@ -85,6 +92,8 @@ export const RenderConfigSchema = z.object({
 
 export const MontagePlanSchema = z.object({
   mode: z.literal('montage_planning'),
+  project_type: z.string().default('ugc_ad'),
+  style: z.string().default('fast_cut_premium_ad'),
   applied_skills: z.array(z.string()),
   clip_analysis: z.array(ClipAnalysisSchema),
   timeline: z.array(TimelineItemSchema),
@@ -92,6 +101,7 @@ export const MontagePlanSchema = z.object({
   editing_notes: z.array(z.string()),
   fallback_strategy: z.record(z.string(), z.string()),
   confidence: z.number(),
+  self_review: SelfReviewSchema,
 });
 
 export type MontagePlan = z.infer<typeof MontagePlanSchema>;

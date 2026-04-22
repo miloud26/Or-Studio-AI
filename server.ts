@@ -7,8 +7,7 @@ import fs from 'fs-extra';
 import { createServer as createViteServer } from 'vite';
 import { getMetadata, renderVideo } from './src/server/videoProcessor.ts';
 import { createJob, updateJob, getJob, setJobClips, getJobClips } from './src/server/jobs.ts';
-import { generateCreativeOutput } from './src/services/geminiService.ts';
-import { ClipMetadata, MontagePlanSchema } from './src/types.ts';
+import { ClipMetadata } from './src/types.ts';
 
 const app = express();
 const PORT = 3000;
@@ -77,34 +76,9 @@ app.post('/api/upload', upload.array('clips', 4), async (req, res) => {
   }
 });
 
-app.post('/api/analyze', async (req, res) => {
-  try {
-    const { jobId, prompt, mode } = req.body;
-    if (!jobId || !prompt || !mode) {
-      return res.status(400).json({ error: 'Missing required parameters' });
-    }
-
-    const clips = getJobClips(jobId);
-    if (!clips) {
-      return res.status(404).json({ error: 'Job assets not found' });
-    }
-
-    updateJob(jobId, { status: 'analyzing', progress: 50 });
-    
-    const creativeOutput = await generateCreativeOutput(jobId, clips, prompt, mode);
-    
-    updateJob(jobId, { status: 'analyzing', progress: 100 });
-    
-    res.json(creativeOutput);
-  } catch (error: any) {
-    console.error('Analysis error:', error);
-    res.status(500).json({ error: error.message || 'Analysis failed' });
-  }
-});
-
 app.post('/api/render', async (req, res) => {
-  const { jobId, montagePlan } = req.body;
-  if (!jobId || !montagePlan) {
+  const { jobId, plan } = req.body;
+  if (!jobId || !plan) {
     return res.status(400).json({ error: 'Job ID and montage plan are required' });
   }
 

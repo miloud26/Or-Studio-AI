@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Film, Wand2, Download, AlertCircle, CheckCircle2, RotateCcw, Lightbulb, FileJson, Share2, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { uploadClips, startRender, getJobStatus, analyzeJob } from './services/api.ts';
+import { uploadClips, startRender, getJobStatus } from './services/api.ts';
+import { generateCreativeOutput } from './services/geminiService.ts';
 import { JobStatus, MontagePlan, PromptResponse } from './types.ts';
 
 export default function App() {
   const [files, setFiles] = useState<File[]>([]);
+  const [skillLibraryFile, setSkillLibraryFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState('Cinematic UGC ad for a premium coffee brand, highlighting morning routine, golden hour lighting, fast cuts');
-  const [mode, setMode] = useState<'PROMPT' | 'MONTAGE'>('MONTAGE');
+  const [mode, setMode] = useState<'PROMPT' | 'MONTAGE' | 'AUTO'>('MONTAGE');
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -36,12 +38,18 @@ export default function App() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const selectedFiles = Array.from(e.target.files);
-      if (selectedFiles.length + files.length > 4) {
-        setError('Exactly 4 clips are required');
+      if (selectedFiles.length + files.length > 10) {
+        setError('Maximum 10 assets allowed');
         return;
       }
       setFiles([...files, ...selectedFiles]);
       setError(null);
+    }
+  };
+
+  const handleSkillLibraryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSkillLibraryFile(e.target.files[0]);
     }
   };
 
@@ -50,32 +58,51 @@ export default function App() {
   };
 
   const handleGenerate = async () => {
-    if (files.length !== 4) {
-      setError('Please upload exactly 4 clips');
+    if (files.length === 0) {
+      setError('Please upload at least one media asset');
       return;
     }
+    if (mode === 'MONTAGE' && files.length !== 4) {
+      setError('Montage mode requires exactly 4 clips');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     try {
-      // 1. Upload
-      setStatus({ id: 'temp', status: 'uploading', progress: 50, mode });
-      const { jobId: newJobId, clips } = await uploadClips(files);
-      setJobId(newJobId);
+      // Load custom skill library if present
+      let customLibrary = null;
+      if (skillLibraryFile) {
+        const text = await skillLibraryFile.text();
+        try {
+          customLibrary = JSON.parse(text);
+        } catch (e) {
+          console.warn("Invalid skill library JSON, will fallback to generic skills.");
+        }
+      }
+
+      // 1. Analyze (Gemini call DIRECTLY ON FRONTEND)
+      setStatus({ id: 'local', status: 'analyzing', progress: 50, mode: mode === 'AUTO' ? 'MONTAGE' : mode });
+      const creativeOutput = await generateCreativeOutput(files, prompt, mode, customLibrary);
       
-      // 2. Analyze (Gemini call on BACKEND)
-      setStatus({ id: newJobId, status: 'analyzing', progress: 0, mode });
-      const creativeOutput = await analyzeJob(newJobId, prompt, mode);
-      
-      if (mode === 'PROMPT') {
+      const actualMode = creativeOutput.mode === 'prompt_generation' ? 'PROMPT' : 'MONTAGE';
+
+      if (actualMode === 'PROMPT') {
         setStatus({
-          id: newJobId,
+          id: 'prompt_job',
           status: 'completed',
           progress: 100,
-          mode,
+          mode: 'PROMPT',
           promptResponse: creativeOutput as PromptResponse
         });
+        setJobId('prompt_job');
         setLoading(false);
       } else {
+        // 2. Upload (if montage, we need the files on server)
+        setStatus({ id: 'temp', status: 'uploading', progress: 75, mode: 'MONTAGE' });
+        const { jobId: newJobId } = await uploadClips(files);
+        setJobId(newJobId);
+
         // 3. Render
         const montagePlan = creativeOutput as MontagePlan;
         await startRender(newJobId, montagePlan);
@@ -83,11 +110,12 @@ export default function App() {
           id: newJobId, 
           status: 'rendering', 
           progress: 0, 
-          mode, 
+          mode: 'MONTAGE', 
           montagePlan 
         });
       }
     } catch (err: any) {
+      console.error(err);
       setError(err.message || 'Workflow failed');
       setLoading(false);
     }
@@ -101,6 +129,7 @@ export default function App() {
 
   const resetAll = () => {
     setFiles([]);
+    setSkillLibraryFile(null);
     setJobId(null);
     setStatus(null);
     setLoading(false);
@@ -117,7 +146,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight">OR STUDIO AI</h1>
-            <p className="text-xs text-[#8E9299] font-mono uppercase tracking-widest">Creative Director v2.0</p>
+            <p className="text-xs text-[#8E9299] font-mono uppercase tracking-widest">Creative Director v3.0</p>
           </div>
         </div>
         {jobId && (
@@ -145,6 +174,13 @@ export default function App() {
               <div className="flex justify-center">
                 <div className="bg-[#151619] p-1 rounded-xl border border-[#1a1a1a] flex">
                   <button 
+                    onClick={() => setMode('AUTO')}
+                    className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'AUTO' ? 'bg-[#F27D26] text-white' : 'text-[#8E9299] hover:text-white'}`}
+                  >
+                    <Wand2 className="w-4 h-4" />
+                    AUTO
+                  </button>
+                  <button 
                     onClick={() => setMode('MONTAGE')}
                     className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'MONTAGE' ? 'bg-[#F27D26] text-white' : 'text-[#8E9299] hover:text-white'}`}
                   >
@@ -164,11 +200,13 @@ export default function App() {
               {/* Title */}
               <div className="text-center space-y-4">
                 <h2 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9]">
-                  {mode === 'MONTAGE' ? 'THE EDITING' : 'THE VISION'} <br />
-                  <span className="text-[#F27D26]">{mode === 'MONTAGE' ? 'AUTOMATED.' : 'ARCHITECTED.'}</span>
+                  {mode === 'AUTO' ? 'THE ENGINE' : mode === 'MONTAGE' ? 'THE EDITING' : 'THE VISION'} <br />
+                  <span className="text-[#F27D26]">{mode === 'AUTO' ? 'INTELLIGENT.' : mode === 'MONTAGE' ? 'AUTOMATED.' : 'ARCHITECTED.'}</span>
                 </h2>
                 <p className="text-[#8E9299] max-w-xl mx-auto">
-                  {mode === 'MONTAGE' 
+                  {mode === 'AUTO' 
+                    ? 'Our multimodal engine analyzes your assets and decides the best production path: cinematic prompting or automated montage.'
+                    : mode === 'MONTAGE' 
                     ? 'Upload your footage and let Or Studio render a cinematic advertising montage using our deterministic FFmpeg engine.' 
                     : 'Transform your raw footage into high-fidelity cinematic prompts for Veo, Sora, or other generative video systems.'}
                 </p>
@@ -177,23 +215,30 @@ export default function App() {
               {/* Upload & Prompt Area */}
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
                 {/* Clips Column */}
-                <div className="lg:col-span-3 space-y-4">
-                  <div className="flex justify-between items-end">
-                    <label className="text-xs font-mono uppercase tracking-widest text-[#8E9299]">Media Assets (4 MP4s)</label>
-                    <span className="text-xs font-mono text-[#F27D26]">{files.length}/4</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    {[0, 1, 2, 3].map((i) => (
-                      <div key={i} className="aspect-video relative group">
-                        {files[i] ? (
+                <div className="lg:col-span-3 space-y-6">
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-end">
+                      <label className="text-xs font-mono uppercase tracking-widest text-[#8E9299]">Multimodal Media Assets</label>
+                      <span className="text-xs font-mono text-[#F27D26]">{files.length}/10</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                      {files.map((file, i) => (
+                        <div key={i} className="aspect-video relative group">
                           <div className="w-full h-full rounded-xl overflow-hidden bg-[#151619] border border-[#1a1a1a] relative">
-                            <video 
-                              src={URL.createObjectURL(files[i])} 
-                              className="w-full h-full object-cover opacity-60"
-                            />
+                            {file.type.startsWith('video/') ? (
+                              <video 
+                                src={URL.createObjectURL(file)} 
+                                className="w-full h-full object-cover opacity-60"
+                              />
+                            ) : (
+                              <img 
+                                src={URL.createObjectURL(file)} 
+                                className="w-full h-full object-cover opacity-60"
+                              />
+                            )}
                             <div className="absolute inset-0 flex items-center justify-center">
                               <span className="text-[10px] font-mono bg-black/50 px-2 py-1 rounded truncate max-w-[80%]">
-                                {files[i].name}
+                                {file.name}
                               </span>
                             </div>
                             <button 
@@ -203,14 +248,29 @@ export default function App() {
                               <span className="text-xl leading-none">&times;</span>
                             </button>
                           </div>
-                        ) : (
-                          <label className="w-full h-full rounded-xl border-2 border-dashed border-[#1a1a1a] hover:border-[#F27D26] hover:bg-[#F27D26]/5 transition-all cursor-pointer flex flex-col items-center justify-center gap-2 group">
-                            <Upload className="w-6 h-6 text-[#1a1a1a] group-hover:text-[#F27D26]" />
-                            <input type="file" accept="video/mp4" className="hidden" onChange={handleFileChange} />
-                          </label>
-                        )}
-                      </div>
-                    ))}
+                        </div>
+                      ))}
+                      <label className="aspect-video rounded-xl border-2 border-dashed border-[#1a1a1a] hover:border-[#F27D26] hover:bg-[#F27D26]/5 transition-all cursor-pointer flex flex-col items-center justify-center gap-2 group">
+                        <Upload className="w-6 h-6 text-[#1a1a1a] group-hover:text-[#F27D26]" />
+                        <input type="file" multiple accept="video/mp4,image/*" className="hidden" onChange={handleFileChange} />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                     <label className="text-xs font-mono uppercase tracking-widest text-[#8E9299]">Authoritative Skill Library (Optional JSON)</label>
+                     <div className="bg-[#151619] border border-[#1a1a1a] rounded-xl p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                           <FileJson className={`w-5 h-5 ${skillLibraryFile ? 'text-[#F27D26]' : 'text-[#333]'}`} />
+                           <span className="text-xs font-mono truncate max-w-[200px]">
+                              {skillLibraryFile ? skillLibraryFile.name : 'No library provided'}
+                           </span>
+                        </div>
+                        <label className="px-4 py-2 bg-[#1a1a1a] hover:bg-[#222] rounded-lg text-[10px] font-bold cursor-pointer transition-colors">
+                           SELECT
+                           <input type="file" accept=".json" className="hidden" onChange={handleSkillLibraryChange} />
+                        </label>
+                     </div>
                   </div>
                 </div>
 
@@ -221,12 +281,12 @@ export default function App() {
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     placeholder="Describe the aesthetic, hook, or mood..."
-                    className="flex-1 bg-[#151619] border border-[#1a1a1a] rounded-xl p-6 text-sm font-mono focus:outline-none focus:border-[#F27D26] resize-none leading-relaxed"
+                    className="flex-1 bg-[#151619] border border-[#1a1a1a] rounded-xl p-6 text-sm font-mono focus:outline-none focus:border-[#F27D26] resize-none leading-relaxed min-h-[220px]"
                   />
                   <button 
                     onClick={handleGenerate}
-                    disabled={loading || files.length !== 4}
-                    className="w-full h-20 bg-[#F27D26] hover:bg-[#f38a3d] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl flex flex-col items-center justify-center transition-all shadow-xl shadow-[#F27D26]/10 group"
+                    disabled={loading || files.length === 0}
+                    className="w-full h-24 bg-[#F27D26] hover:bg-[#f38a3d] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl flex flex-col items-center justify-center transition-all shadow-xl shadow-[#F27D26]/10 group"
                   >
                     {loading ? (
                       <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
@@ -234,8 +294,10 @@ export default function App() {
                       </motion.div>
                     ) : (
                       <>
-                        <span className="text-lg font-bold tracking-tight group-active:scale-95">EXECUTE {mode}</span>
-                        <span className="text-[10px] font-mono tracking-widest opacity-60">Initializing workflow core</span>
+                        <span className="text-lg font-bold tracking-tight group-active:scale-95 uppercase">
+                          {mode === 'AUTO' ? 'RUN GENERATIVE CORE' : `EXECUTE ${mode}`}
+                        </span>
+                        <span className="text-[10px] font-mono tracking-widest opacity-60">Initializing multimodal workflow</span>
                       </>
                     )}
                   </button>
@@ -262,9 +324,9 @@ export default function App() {
                   <h3 className="text-xs font-mono uppercase tracking-[0.3em] text-[#8E9299]">{mode} WORKFLOW ACTIVE</h3>
                   <p className="text-3xl font-bold uppercase tracking-tight">
                     {status?.status === 'uploading' && 'Ingesting Raw Media'}
-                    {status?.status === 'analyzing' && 'Creative Cognitive Analysis'}
+                    {status?.status === 'analyzing' && 'Multimodal Cognitive Analysis'}
                     {status?.status === 'rendering' && 'FFmpeg Core Synthesis'}
-                    {status?.status === 'completed' && 'Production Ready'}
+                    {status?.status === 'completed' && 'Production Grade Result'}
                     {status?.status === 'failed' && 'Critical Workflow Failure'}
                   </p>
                 </div>
@@ -294,7 +356,7 @@ export default function App() {
                       <div className="p-4 bg-[#0a0a0a] border-b border-[#1a1a1a] flex justify-between items-center">
                         <span className="text-[10px] font-mono uppercase tracking-widest text-[#8E9299]">GENERATED CINEMATIC PROMPT</span>
                         <button 
-                          onClick={() => copyToClipboard(status.promptResponse!.prompt)}
+                          onClick={() => copyToClipboard(status.promptResponse!.creative_direction.prompt)}
                           className="text-[#F27D26] hover:text-white transition-colors"
                         >
                           {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -302,8 +364,36 @@ export default function App() {
                       </div>
                       <div className="p-8">
                         <p className="text-xl font-medium leading-relaxed font-serif italic text-[#E4E3E0]">
-                          "{status.promptResponse.prompt}"
+                          "{status.promptResponse.creative_direction.prompt}"
                         </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
+                      <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">AI SELF-REVIEW & AUTO-CORRECT</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         <div className="space-y-2">
+                             <p className="text-[9px] uppercase text-[#8E9299]">Detected Anomalies</p>
+                             <ul className="space-y-1">
+                                {status.promptResponse.self_review.issues_found.map((issue, i) => (
+                                   <li key={i} className="text-xs text-red-400 flex gap-2">
+                                      <span className="text-red-500 font-bold">!</span> {issue}
+                                   </li>
+                                ))}
+                                {status.promptResponse.self_review.issues_found.length === 0 && <li className="text-xs text-[#555] italic">No issues detected.</li>}
+                             </ul>
+                         </div>
+                         <div className="space-y-2">
+                             <p className="text-[9px] uppercase text-[#8E9299]">Applied Optimizations</p>
+                             <ul className="space-y-1">
+                                {status.promptResponse.self_review.fixes_applied.map((fix, i) => (
+                                   <li key={i} className="text-xs text-green-400 flex gap-2">
+                                      <span className="text-green-500 font-bold">✓</span> {fix}
+                                   </li>
+                                ))}
+                                {status.promptResponse.self_review.fixes_applied.length === 0 && <li className="text-xs text-[#555] italic">No active fixes required.</li>}
+                             </ul>
+                         </div>
                       </div>
                     </div>
 
@@ -333,7 +423,7 @@ export default function App() {
                     </div>
                     <div className="bg-[#F27D26]/10 border border-[#F27D26]/20 rounded-2xl p-6 flex items-center justify-between">
                       <div className="space-y-1">
-                        <p className="text-[10px] uppercase text-[#F27D26]">Confidence</p>
+                        <p className="text-[10px] uppercase text-[#F27D26]">Model Confidence</p>
                         <p className="text-xl font-bold tracking-tighter">{(status.promptResponse.confidence * 100).toFixed(0)}%</p>
                       </div>
                       <Wand2 className="w-8 h-8 text-[#F27D26]" />
@@ -366,7 +456,46 @@ export default function App() {
               {mode === 'MONTAGE' && status?.montagePlan && (
                 <div className="space-y-6">
                   <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
-                    <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">Applied Montage Skills</h4>
+                    <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">AI SELF-REVIEW & SYNC CHECK</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                       <div className="space-y-2">
+                           <p className="text-[9px] uppercase text-[#8E9299]">Logic Errors Corrected</p>
+                           <ul className="space-y-1">
+                              {status.montagePlan.self_review.issues_found.map((issue, i) => (
+                                 <li key={i} className="text-xs text-red-400 flex gap-2">
+                                    <span className="text-red-500 font-bold">!</span> {issue}
+                                 </li>
+                              ))}
+                              {status.montagePlan.self_review.issues_found.length === 0 && <li className="text-xs text-[#555] italic">No logic errors detected.</li>}
+                           </ul>
+                       </div>
+                       <div className="space-y-2">
+                           <p className="text-[9px] uppercase text-[#8E9299]">Self-Correction Logs</p>
+                           <ul className="space-y-1">
+                              {status.montagePlan.self_review.fixes_applied.map((fix, i) => (
+                                 <li key={i} className="text-xs text-green-400 flex gap-2">
+                                    <span className="text-green-500 font-bold">✓</span> {fix}
+                                 </li>
+                              ))}
+                              {status.montagePlan.self_review.fixes_applied.length === 0 && <li className="text-xs text-[#555] italic">No fixes applied.</li>}
+                           </ul>
+                       </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 flex justify-between items-center gap-4">
+                     <div>
+                        <p className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest mb-1">Project Type</p>
+                        <p className="text-lg font-bold text-[#F27D26]">{status.montagePlan.project_type.toUpperCase().replace('_', ' ')}</p>
+                     </div>
+                     <div className="text-right">
+                        <p className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest mb-1">Creative Style</p>
+                        <p className="text-lg font-bold text-white">{status.montagePlan.style.toUpperCase().replace('_', ' ')}</p>
+                     </div>
+                  </div>
+
+                  <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
+                    <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">Applied Creative Skills</h4>
                     <div className="flex flex-wrap gap-2">
                       {status.montagePlan.applied_skills.map((skill, i) => (
                         <span key={i} className="px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full text-[10px] font-mono border border-blue-500/20">
