@@ -9,7 +9,7 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [skillLibraryFile, setSkillLibraryFile] = useState<File | null>(null);
   const [prompt, setPrompt] = useState('Cinematic UGC ad for a premium coffee brand, highlighting morning routine, golden hour lighting, fast cuts');
-  const [mode, setMode] = useState<'PROMPT' | 'MONTAGE' | 'AUTO'>('MONTAGE');
+  const [mode, setMode] = useState<'MONTAGE'>('MONTAGE');
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -82,38 +82,22 @@ export default function App() {
       }
 
       // 1. Analyze (Gemini call DIRECTLY ON FRONTEND)
-      setStatus({ id: 'local', status: 'analyzing', progress: 50, mode: mode === 'AUTO' ? 'MONTAGE' : mode });
-      const creativeOutput = await generateCreativeOutput(files, prompt, mode, customLibrary);
+      setStatus({ id: 'local', status: 'analyzing', progress: 50 });
+      const montagePlan = await generateCreativeOutput(files, prompt, 'MONTAGE', customLibrary) as MontagePlan;
       
-      const actualMode = creativeOutput.mode === 'prompt_generation' ? 'PROMPT' : 'MONTAGE';
+      // 2. Upload (we need the files on server for rendering)
+      setStatus({ id: 'temp', status: 'uploading', progress: 75 });
+      const { jobId: newJobId } = await uploadClips(files);
+      setJobId(newJobId);
 
-      if (actualMode === 'PROMPT') {
-        setStatus({
-          id: 'prompt_job',
-          status: 'completed',
-          progress: 100,
-          mode: 'PROMPT',
-          promptResponse: creativeOutput as PromptResponse
-        });
-        setJobId('prompt_job');
-        setLoading(false);
-      } else {
-        // 2. Upload (if montage, we need the files on server)
-        setStatus({ id: 'temp', status: 'uploading', progress: 75, mode: 'MONTAGE' });
-        const { jobId: newJobId } = await uploadClips(files);
-        setJobId(newJobId);
-
-        // 3. Render
-        const montagePlan = creativeOutput as MontagePlan;
-        await startRender(newJobId, montagePlan);
-        setStatus({ 
-          id: newJobId, 
-          status: 'rendering', 
-          progress: 0, 
-          mode: 'MONTAGE', 
-          montagePlan 
-        });
-      }
+      // 3. Render
+      await startRender(newJobId, montagePlan);
+      setStatus({ 
+        id: newJobId, 
+        status: 'rendering', 
+        progress: 0, 
+        montagePlan 
+      });
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Workflow failed');
@@ -146,7 +130,7 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight">OR STUDIO AI</h1>
-            <p className="text-xs text-[#8E9299] font-mono uppercase tracking-widest">Creative Director v3.0</p>
+            <p className="text-xs text-[#8E9299] font-mono uppercase tracking-widest">Montage Engine v4.0</p>
           </div>
         </div>
         {jobId && (
@@ -170,45 +154,14 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-12"
             >
-              {/* Mode Selector */}
-              <div className="flex justify-center">
-                <div className="bg-[#151619] p-1 rounded-xl border border-[#1a1a1a] flex">
-                  <button 
-                    onClick={() => setMode('AUTO')}
-                    className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'AUTO' ? 'bg-[#F27D26] text-white' : 'text-[#8E9299] hover:text-white'}`}
-                  >
-                    <Wand2 className="w-4 h-4" />
-                    AUTO
-                  </button>
-                  <button 
-                    onClick={() => setMode('MONTAGE')}
-                    className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'MONTAGE' ? 'bg-[#F27D26] text-white' : 'text-[#8E9299] hover:text-white'}`}
-                  >
-                    <Film className="w-4 h-4" />
-                    MONTAGE
-                  </button>
-                  <button 
-                    onClick={() => setMode('PROMPT')}
-                    className={`px-6 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${mode === 'PROMPT' ? 'bg-[#F27D26] text-white' : 'text-[#8E9299] hover:text-white'}`}
-                  >
-                    <Lightbulb className="w-4 h-4" />
-                    PROMPT
-                  </button>
-                </div>
-              </div>
-
               {/* Title */}
               <div className="text-center space-y-4">
                 <h2 className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9]">
-                  {mode === 'AUTO' ? 'THE ENGINE' : mode === 'MONTAGE' ? 'THE EDITING' : 'THE VISION'} <br />
-                  <span className="text-[#F27D26]">{mode === 'AUTO' ? 'INTELLIGENT.' : mode === 'MONTAGE' ? 'AUTOMATED.' : 'ARCHITECTED.'}</span>
+                  THE EDITING <br />
+                  <span className="text-[#F27D26]">PRODUCTION ENGINE.</span>
                 </h2>
                 <p className="text-[#8E9299] max-w-xl mx-auto">
-                  {mode === 'AUTO' 
-                    ? 'Our multimodal engine analyzes your assets and decides the best production path: cinematic prompting or automated montage.'
-                    : mode === 'MONTAGE' 
-                    ? 'Upload your footage and let Or Studio render a cinematic advertising montage using our deterministic FFmpeg engine.' 
-                    : 'Transform your raw footage into high-fidelity cinematic prompts for Veo, Sora, or other generative video systems.'}
+                  Deterministic video editing plan generation. Mixed media support (videos + images as 3s clips). Optimized for 1080x1920 vertical montage.
                 </p>
               </div>
 
@@ -295,9 +248,9 @@ export default function App() {
                     ) : (
                       <>
                         <span className="text-lg font-bold tracking-tight group-active:scale-95 uppercase">
-                          {mode === 'AUTO' ? 'RUN GENERATIVE CORE' : `EXECUTE ${mode}`}
+                          EXECUTE PRODUCTION
                         </span>
-                        <span className="text-[10px] font-mono tracking-widest opacity-60">Initializing multimodal workflow</span>
+                        <span className="text-[10px] font-mono tracking-widest opacity-60">Initializing editing core</span>
                       </>
                     )}
                   </button>
@@ -348,92 +301,8 @@ export default function App() {
                 />
               </div>
 
-              {/* MODE A: Prompt Generation Result */}
-              {mode === 'PROMPT' && status?.promptResponse && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 space-y-6">
-                    <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl overflow-hidden">
-                      <div className="p-4 bg-[#0a0a0a] border-b border-[#1a1a1a] flex justify-between items-center">
-                        <span className="text-[10px] font-mono uppercase tracking-widest text-[#8E9299]">GENERATED CINEMATIC PROMPT</span>
-                        <button 
-                          onClick={() => copyToClipboard(status.promptResponse!.creative_direction.prompt)}
-                          className="text-[#F27D26] hover:text-white transition-colors"
-                        >
-                          {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                        </button>
-                      </div>
-                      <div className="p-8">
-                        <p className="text-xl font-medium leading-relaxed font-serif italic text-[#E4E3E0]">
-                          "{status.promptResponse.creative_direction.prompt}"
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
-                      <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">AI SELF-REVIEW & AUTO-CORRECT</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <div className="space-y-2">
-                             <p className="text-[9px] uppercase text-[#8E9299]">Detected Anomalies</p>
-                             <ul className="space-y-1">
-                                {status.promptResponse.self_review.issues_found.map((issue, i) => (
-                                   <li key={i} className="text-xs text-red-400 flex gap-2">
-                                      <span className="text-red-500 font-bold">!</span> {issue}
-                                   </li>
-                                ))}
-                                {status.promptResponse.self_review.issues_found.length === 0 && <li className="text-xs text-[#555] italic">No issues detected.</li>}
-                             </ul>
-                         </div>
-                         <div className="space-y-2">
-                             <p className="text-[9px] uppercase text-[#8E9299]">Applied Optimizations</p>
-                             <ul className="space-y-1">
-                                {status.promptResponse.self_review.fixes_applied.map((fix, i) => (
-                                   <li key={i} className="text-xs text-green-400 flex gap-2">
-                                      <span className="text-green-500 font-bold">✓</span> {fix}
-                                   </li>
-                                ))}
-                                {status.promptResponse.self_review.fixes_applied.length === 0 && <li className="text-xs text-[#555] italic">No active fixes required.</li>}
-                             </ul>
-                         </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
-                      <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">Applied Creative Skills</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {status.promptResponse.applied_skills.map((skill, i) => (
-                          <span key={i} className="px-3 py-1 bg-[#F27D26]/10 text-[#F27D26] rounded-full text-[10px] font-mono border border-[#F27D26]/20">
-                            {skill.toUpperCase()}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
-                      <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">Visual Summary</h4>
-                      <div className="space-y-3">
-                        {Object.entries(status.promptResponse.visual_summary).map(([key, value]) => (
-                          <div key={key} className="space-y-1">
-                            <p className="text-[9px] uppercase text-[#8E9299]">{key.replace('_', ' ')}</p>
-                            <p className="text-xs font-bold">{value as string}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="bg-[#F27D26]/10 border border-[#F27D26]/20 rounded-2xl p-6 flex items-center justify-between">
-                      <div className="space-y-1">
-                        <p className="text-[10px] uppercase text-[#F27D26]">Model Confidence</p>
-                        <p className="text-xl font-bold tracking-tighter">{(status.promptResponse.confidence * 100).toFixed(0)}%</p>
-                      </div>
-                      <Wand2 className="w-8 h-8 text-[#F27D26]" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {/* MODE B: Montage Result */}
-              {mode === 'MONTAGE' && status?.status === 'completed' && status.outputUrl && (
+              {status?.status === 'completed' && status.outputUrl && (
                 <div className="space-y-8">
                   <div className="aspect-[9/16] max-w-[320px] mx-auto bg-black rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(242,125,38,0.15)] ring-1 ring-[#1a1a1a] relative group">
                     <video src={status.outputUrl} controls className="w-full h-full object-cover" autoPlay />
@@ -453,7 +322,7 @@ export default function App() {
               )}
 
               {/* Montage Analysis Data */}
-              {mode === 'MONTAGE' && status?.montagePlan && (
+              {status?.montagePlan && (
                 <div className="space-y-6">
                   <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
                     <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">AI SELF-REVIEW & SYNC CHECK</h4>
@@ -483,17 +352,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 flex justify-between items-center gap-4">
-                     <div>
-                        <p className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest mb-1">Project Type</p>
-                        <p className="text-lg font-bold text-[#F27D26]">{status.montagePlan.project_type.toUpperCase().replace('_', ' ')}</p>
-                     </div>
-                     <div className="text-right">
-                        <p className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest mb-1">Creative Style</p>
-                        <p className="text-lg font-bold text-white">{status.montagePlan.style.toUpperCase().replace('_', ' ')}</p>
-                     </div>
-                  </div>
-
                   <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
                     <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">Applied Creative Skills</h4>
                     <div className="flex flex-wrap gap-2">
@@ -510,40 +368,28 @@ export default function App() {
                       <div key={i} className="bg-[#151619] border border-[#1a1a1a] rounded-xl p-4 space-y-3">
                         <div className="flex justify-between items-center">
                           <span className="text-[10px] font-mono text-[#F27D26]">{analysis.clip_id}</span>
-                          <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border ${analysis.recommended_role === 'hook' ? 'bg-orange-500/10 border-orange-500/20 text-orange-500' : 'bg-blue-500/10 border-blue-500/20 text-blue-500'}`}>
+                          <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border border-blue-500/20 text-blue-500`}>
                             {analysis.recommended_role.toUpperCase()}
                           </span>
                         </div>
                         <div className="space-y-1.5">
                           <div className="flex justify-between text-[8px] uppercase text-[#8E9299]">
-                            <span>Hook Strength</span>
-                            <span>{analysis.hook_value}%</span>
+                            <span>Motion Energy</span>
+                            <span>{(analysis.motion_energy * 100).toFixed(0)}%</span>
                           </div>
                           <div className="h-0.5 bg-black rounded-full overflow-hidden">
-                            <div className="h-full bg-[#F27D26]" style={{ width: `${analysis.hook_value}%` }} />
+                            <div className="h-full bg-blue-500" style={{ width: `${analysis.motion_energy * 100}%` }} />
                           </div>
                           <div className="flex justify-between text-[8px] uppercase text-[#8E9299]">
-                            <span>Product Focus</span>
-                            <span>{analysis.product_focus}%</span>
+                            <span>Ad Usefulness</span>
+                            <span>{(analysis.ad_usefulness * 100).toFixed(0)}%</span>
                           </div>
                           <div className="h-0.5 bg-black rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500" style={{ width: `${analysis.product_focus}%` }} />
+                            <div className="h-full bg-[#F27D26]" style={{ width: `${analysis.ad_usefulness * 100}%` }} />
                           </div>
                         </div>
                       </div>
                     ))}
-                  </div>
-
-                  <div className="bg-[#151619] border border-[#1a1a1a] rounded-2xl p-6 space-y-4">
-                    <h4 className="text-[10px] font-mono text-[#8E9299] uppercase tracking-widest">Director's Editing Notes</h4>
-                    <ul className="space-y-2">
-                       {status.montagePlan.editing_notes.map((note, i) => (
-                         <li key={i} className="text-xs font-mono text-[#8E9299] flex gap-3">
-                            <span className="text-[#F27D26]">›</span>
-                            {note}
-                         </li>
-                       ))}
-                    </ul>
                   </div>
                 </div>
               )}

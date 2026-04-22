@@ -6,29 +6,80 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
 
 const SYSTEM_INSTRUCTION = `
 ROLE
-You are a production-grade Creative Director, Visual Analyst, Editor, and Code Reviewer.
+You are a production-grade AI Montage Engine.
+You analyze mixed media (images + short videos) and generate a deterministic video editing plan.
 
-CAPABILITIES
-- Accept multimodal inputs: images and short videos (represented via base64 in parts).
-- Accept an optional Skill Library file (JSON) provided at runtime.
-- Produce either: (A) prompt_generation (B) montage_planning.
-- Perform SELF-REVIEW and AUTO-CORRECTION before final output.
+You DO NOT generate prompts.
+You DO NOT generate explanations.
+You ONLY produce valid structured JSON for montage execution.
 
-HARD RULES
-- Output must be VALID JSON only.
-- No markdown, no prose outside JSON.
-- Do not hallucinate visual details.
-- Use MM:SS timestamps when referencing video moments.
-- Optimize for vertical 1080x1920 unless user requests otherwise.
+---
 
-ANALYSIS PIPELINE
-1) Detect mode.
-2) Per-media analysis: subject, scene, camera, lighting, motion, composition, hook value.
-3) Skill retrieval (from authoritative library if present).
-4) Build plan.
-5) SELF-REVIEW: Validate schema, check consistency (duration = end - start, no duplicate order), check visual logic.
-6) AUTO-CORRECT: Fix any issues silently.
-7) Return valid JSON.
+MODE
+MONTAGE ONLY
+
+Ignore all prompt generation tasks.
+Always return montage planning output.
+
+---
+
+INPUT TYPES
+You may receive:
+* images (jpg, png, webp)
+* videos (mp4, mov, etc.)
+* mixed assets (up to 10)
+
+Images must be treated as 3-second video clips.
+
+---
+
+SKILL LIBRARY (DYNAMIC)
+If a skill library JSON is provided:
+* Treat it as authoritative
+* Use it for decision making
+* Apply: prompt_signal, visual_cues, motion_cues, transition_cues, negative_cues, use_cases
+
+If not provided:
+* Use internal cinematic editing rules
+
+---
+
+CORE EDITING RULES
+* Always place strongest hook first
+* Clip duration: 1–3 seconds
+* Total video: 12–20 seconds
+* Prefer: motion, faces, product closeups
+* Avoid: static frames, empty shots
+* Final clip must act as CTA
+* Optimize for vertical 1080x1920
+
+---
+
+STRICT TYPE RULES (CRITICAL)
+ALL numeric fields MUST be numbers (never strings)
+REQUIRED NUMBERS: motion_energy, face_presence, composition_score, ad_usefulness, start_seconds, end_seconds, duration_seconds, transition.duration
+REQUIRED STRINGS: clip_id, role, color_mood
+REQUIRED ARRAYS: clip_analysis, timeline, self_review.fixes_applied
+
+DEFAULTS (if missing):
+* number → 0.0
+* string → "neutral"
+* array → []
+
+---
+
+SELF-REVIEW (MANDATORY)
+Before returning output:
+1. Fix all type errors
+2. Convert string numbers → numbers
+3. Ensure schema validity
+4. Ensure: hook first, no empty clips, proper durations
+5. If any issue: auto-correct silently
+
+---
+
+OUTPUT FORMAT (ONLY THIS)
+JSON ONLY. No prose.
 `;
 
 const fileToPart = async (file: File) => {
@@ -66,16 +117,17 @@ export const generateCreativeOutput = async (
     AUTHORITATIVE SKILL LIBRARY:
     ${JSON.stringify(skillLibrary, null, 2)}
 
-    TASK: ${mode}_MODE
+    TASK: MONTAGE_ONLY
     User Intent: ${userPrompt}
     
     Media Assets: Provided multimodal parts.
     
     REQUIRED ACTION:
-    Identify relevant skills from the library and apply them to this analysis.
-    If mode is AUTO, decide if the user wants a cinematic prompt generation or an FFmpeg montage plan. 
+    Identify relevant skills from the library and apply them.
+    Analyze all assets. Treat images as 3s video.
+    Generate a deterministic video montage plan.
     Perform a MANDATORY SELF-REVIEW and AUTO-CORRECTION before finalizing the JSON.
-    Ensure output matches the specified schema.
+    Ensure output matches the specified schema EXACTLY.
   `;
 
   const response = await ai.models.generateContent({
@@ -84,54 +136,11 @@ export const generateCreativeOutput = async (
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,
       responseMimeType: "application/json",
-      responseSchema: mode === 'PROMPT' ? {
+      responseSchema: {
         type: Type.OBJECT,
-        required: ["mode", "applied_skills", "visual_summary", "creative_direction", "confidence", "self_review"],
+        required: ["mode", "applied_skills", "clip_analysis", "timeline", "render", "fallback_strategy", "self_review"],
         properties: {
           mode: { type: Type.STRING },
-          applied_skills: { type: Type.ARRAY, items: { type: Type.STRING } },
-          visual_summary: {
-            type: Type.OBJECT,
-            properties: {
-              subject: { type: Type.STRING },
-              scene: { type: Type.STRING },
-              camera: { type: Type.STRING },
-              motion: { type: Type.STRING },
-              lighting: { type: Type.STRING },
-              composition: { type: Type.STRING },
-              color_palette: { type: Type.STRING },
-              mood: { type: Type.STRING },
-              style: { type: Type.STRING },
-            }
-          },
-          creative_direction: {
-            type: Type.OBJECT,
-            properties: {
-              prompt: { type: Type.STRING },
-              negative_prompt: { type: Type.STRING },
-              keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-              camera_language: { type: Type.ARRAY, items: { type: Type.STRING } },
-              motion_language: { type: Type.ARRAY, items: { type: Type.STRING } },
-              lighting_language: { type: Type.ARRAY, items: { type: Type.STRING } },
-              composition_rules: { type: Type.ARRAY, items: { type: Type.STRING } },
-            }
-          },
-          confidence: { type: Type.NUMBER },
-          self_review: {
-             type: Type.OBJECT,
-             properties: {
-               issues_found: { type: Type.ARRAY, items: { type: Type.STRING } },
-               fixes_applied: { type: Type.ARRAY, items: { type: Type.STRING } }
-             }
-          }
-        }
-      } : {
-        type: Type.OBJECT,
-        required: ["mode", "project_type", "style", "applied_skills", "clip_analysis", "timeline", "render", "editing_notes", "fallback_strategy", "confidence", "self_review"],
-        properties: {
-          mode: { type: Type.STRING },
-          project_type: { type: Type.STRING },
-          style: { type: Type.STRING },
           applied_skills: { type: Type.ARRAY, items: { type: Type.STRING } },
           clip_analysis: {
             type: Type.ARRAY,
@@ -139,12 +148,9 @@ export const generateCreativeOutput = async (
               type: Type.OBJECT,
               properties: {
                 clip_id: { type: Type.STRING },
-                hook_value: { type: Type.NUMBER },
                 motion_energy: { type: Type.NUMBER },
-                product_focus: { type: Type.NUMBER },
                 face_presence: { type: Type.NUMBER },
                 composition_score: { type: Type.NUMBER },
-                transition_fit: { type: Type.STRING },
                 color_mood: { type: Type.STRING },
                 ad_usefulness: { type: Type.NUMBER },
                 recommended_role: { type: Type.STRING },
@@ -168,33 +174,6 @@ export const generateCreativeOutput = async (
                     type: { type: Type.STRING },
                     duration: { type: Type.NUMBER }
                   }
-                },
-                effects: {
-                  type: Type.OBJECT,
-                  properties: {
-                    motion: {
-                      type: Type.OBJECT,
-                      properties: {
-                        zoom: { type: Type.STRING },
-                        strength: { type: Type.NUMBER }
-                      }
-                    },
-                    color: {
-                      type: Type.OBJECT,
-                      properties: {
-                        brightness: { type: Type.NUMBER },
-                        contrast: { type: Type.NUMBER },
-                        saturation: { type: Type.NUMBER }
-                      }
-                    },
-                    overlay: {
-                      type: Type.OBJECT,
-                      properties: {
-                        text: { type: Type.STRING },
-                        safe_area: { type: Type.STRING }
-                      }
-                    }
-                  }
                 }
               }
             }
@@ -211,9 +190,13 @@ export const generateCreativeOutput = async (
               pix_fmt: { type: Type.STRING },
             }
           },
-          editing_notes: { type: Type.ARRAY, items: { type: Type.STRING } },
-          fallback_strategy: { type: Type.OBJECT },
-          confidence: { type: Type.NUMBER },
+          fallback_strategy: {
+             type: Type.OBJECT,
+             properties: {
+                if_transition_fails: { type: Type.STRING },
+                if_invalid_data: { type: Type.STRING }
+             }
+          },
           self_review: {
              type: Type.OBJECT,
              properties: {
@@ -229,9 +212,5 @@ export const generateCreativeOutput = async (
   const rawJson = response.text;
   const result = JSON.parse(rawJson);
   
-  if (result.mode === 'prompt_generation' || mode === 'PROMPT') {
-    return PromptResponseSchema.parse(result);
-  } else {
-    return MontagePlanSchema.parse(result);
-  }
+  return MontagePlanSchema.parse(result);
 };

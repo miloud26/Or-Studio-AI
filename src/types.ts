@@ -39,12 +39,9 @@ export type PromptResponse = z.infer<typeof PromptResponseSchema>;
 // --- Montage Mode Types ---
 export const ClipAnalysisSchema = z.object({
   clip_id: z.string(),
-  hook_value: z.number(),
   motion_energy: z.number(),
-  product_focus: z.number(),
   face_presence: z.number(),
   composition_score: z.number(),
-  transition_fit: z.string(), // "cut|fade|xfade"
   color_mood: z.string(),
   ad_usefulness: z.number(),
   recommended_role: z.string(), // "hook|support|proof|cta"
@@ -92,15 +89,14 @@ export const RenderConfigSchema = z.object({
 
 export const MontagePlanSchema = z.object({
   mode: z.literal('montage_planning'),
-  project_type: z.string().default('ugc_ad'),
-  style: z.string().default('fast_cut_premium_ad'),
   applied_skills: z.array(z.string()),
   clip_analysis: z.array(ClipAnalysisSchema),
   timeline: z.array(TimelineItemSchema),
   render: RenderConfigSchema,
-  editing_notes: z.array(z.string()),
-  fallback_strategy: z.record(z.string(), z.string()),
-  confidence: z.number(),
+  fallback_strategy: z.object({
+    if_transition_fails: z.string().default('cut_only'),
+    if_invalid_data: z.string().default('auto_fix'),
+  }),
   self_review: SelfReviewSchema,
 });
 
